@@ -10,10 +10,43 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build app bundle
-        run: xcodebuild -project MacCheck.xcodeproj -scheme MacCheck -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO
+
+      - name: Build app
+        run: swift build --configuration release
+
       - name: Package app
-        run: ditto -c -k --sequesterRsrc --keepParent build/Build/Products/Release/MacCheck.app MacCheck.app.zip
+        run: |
+          APP="MacCheck.app"
+          mkdir -p "$APP/Contents/MacOS"
+          cp .build/release/MacCheck "$APP/Contents/MacOS/MacCheck"
+
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>MacCheck</string>
+            <key>CFBundleIdentifier</key>
+            <string>lt.maccheck.diagnostics</string>
+            <key>CFBundleName</key>
+            <string>MacCheck</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleVersion</key>
+            <string>1</string>
+            <key>CFBundleShortVersionString</key>
+            <string>1.0</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>NSPrincipalClass</key>
+            <string>NSApplication</string>
+          </dict>
+          </plist>
+          PLIST
+
+          ditto -c -k --sequesterRsrc --keepParent "$APP" MacCheck.app.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: MacCheck-macOS
