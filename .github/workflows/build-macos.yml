@@ -1,0 +1,21 @@
+name: Build MacCheck for macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app bundle
+        run: xcodebuild -project MacCheck.xcodeproj -scheme MacCheck -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO
+      - name: Package app
+        run: ditto -c -k --sequesterRsrc --keepParent build/Build/Products/Release/MacCheck.app MacCheck.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MacCheck-macOS
+          path: MacCheck.app.zip
+          if-no-files-found: error
