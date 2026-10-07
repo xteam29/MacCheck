@@ -6,6 +6,12 @@ struct ContentView: View {
     @State private var selectedTab = "Apžvalga"
     @State private var showDisplayTest = false
     @State private var showKeyboardTest = false
+    @State private var showAudioTest = false
+    @State private var showMicrophoneTest = false
+    @State private var showCameraTest = false
+    @State private var showFanTest = false
+    @State private var showSensorsTest = false
+    @State private var showPowerTest = false
 
     private let tabs = ["Apžvalga", "Įrenginiai", "Rankiniai testai"]
 
@@ -50,6 +56,12 @@ struct ContentView: View {
         .task { if model.inventory.isEmpty { model.runScan() } }
         .sheet(isPresented: $showDisplayTest) { DisplayColorTest() }
         .sheet(isPresented: $showKeyboardTest) { KeyboardTestView() }
+        .sheet(isPresented: $showAudioTest) { AudioChannelTestView() }
+        .sheet(isPresented: $showMicrophoneTest) { MicrophoneTestView() }
+        .sheet(isPresented: $showCameraTest) { CameraTestView() }
+        .sheet(isPresented: $showFanTest) { FanRampTestView() }
+        .sheet(isPresented: $showSensorsTest) { SensorsAndSleepTestView() }
+        .sheet(isPresented: $showPowerTest) { ChargingMeterView() }
         .alert("Ataskaitos klaida", isPresented: Binding(
             get: { model.reportError != nil },
             set: { if !$0 { model.reportError = nil } }
@@ -134,9 +146,9 @@ struct ContentView: View {
             Text("Rankiniai testai").font(.largeTitle.bold())
             Text("Atlik veiksmą su žinomu veikiančiu priedu, tada pažymėk rezultatą.").foregroundStyle(.secondary)
             List {
-                ForEach(groupedTests, id: \.0) { group, tests in
-                    Section(group) {
-                        ForEach(tests) { test in
+                ForEach(groupedTests, id: \.0) { group in
+                    Section(group.0) {
+                        ForEach(group.1) { test in
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     Text(test.title).font(.headline)
@@ -145,6 +157,18 @@ struct ContentView: View {
                                         Button("Atverti testą") { showDisplayTest = true }
                                     } else if test.id == "keyboard" {
                                         Button("Atverti testą") { showKeyboardTest = true }
+                                    } else if test.id == "speakers" {
+                                        Button("Tikrinti kanalus") { showAudioTest = true }
+                                    } else if test.id == "microphone" {
+                                        Button("Įrašyti ir paleisti") { showMicrophoneTest = true }
+                                    } else if test.id == "camera" {
+                                        Button("Paleisti kamerą") { showCameraTest = true }
+                                    } else if test.id == "thermal" {
+                                        Button("Tikrinti ventiliatorių") { showFanTest = true }
+                                    } else if test.id == "sensors" || test.id == "sleep" {
+                                        Button("Atverti testą") { showSensorsTest = true }
+                                    } else if test.id == "charging" {
+                                        Button("Rodyti V / A / W") { showPowerTest = true }
                                     }
                                     Picker("Rezultatas", selection: statusBinding(for: test)) {
                                         ForEach(TestStatus.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -193,7 +217,11 @@ private struct MetricCard: View {
 private struct DisplayColorTest: View {
     @Environment(\.dismiss) private var dismiss
     @State private var index = 0
-    private let colors: [(String, Color)] = [("Balta", .white), ("Juoda", .black), ("Raudona", .red), ("Žalia", .green), ("Mėlyna", .blue), ("Pilka", .gray)]
+    private let colors: [(String, Color)] = [
+        ("Balta", .white), ("Juoda", .black), ("Raudona", .red),
+        ("Žalia", .green), ("Mėlyna", .blue), ("Geltona", .yellow),
+        ("Žydra", .cyan), ("Purpurinė", .purple), ("Pilka", .gray)
+    ]
     var body: some View {
         ZStack {
             colors[index].1.ignoresSafeArea()
@@ -207,7 +235,7 @@ private struct DisplayColorTest: View {
                 HStack {
                     Button("← Ankstesnė") { index = (index - 1 + colors.count) % colors.count }
                     Spacer()
-                    Text("Patikrink dėmes, linijas ir mirgėjimą").padding(10).background(.ultraThinMaterial).clipShape(.capsule)
+                    Text("Ieškok dėmių, linijų, mirgėjimo ar neveikiančių pikselių").padding(10).background(.ultraThinMaterial).clipShape(.capsule)
                     Spacer()
                     Button("Kita →") { index = (index + 1) % colors.count }
                 }
@@ -272,7 +300,22 @@ private final class KeyCaptureNSView: NSView {
     override var acceptsFirstResponder: Bool { true }
     override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
     override func keyDown(with event: NSEvent) {
+        let specialKeys: [UInt16: String] = [
+            36: "RETURN", 48: "TAB", 49: "SPACE", 51: "DELETE", 53: "ESC",
+            123: "←", 124: "→", 125: "↓", 126: "↑"
+        ]
+        if let name = specialKeys[event.keyCode] {
+            onKey?(name)
+            return
+        }
         let key = event.charactersIgnoringModifiers?.uppercased()
         onKey?(key)
+    }
+    override func flagsChanged(with event: NSEvent) {
+        let modifierKeys: [UInt16: String] = [
+            54: "COMMAND", 55: "COMMAND", 56: "SHIFT", 60: "SHIFT",
+            57: "CAPS", 58: "OPTION", 61: "OPTION", 59: "CONTROL", 62: "CONTROL", 63: "FN"
+        ]
+        onKey?(modifierKeys[event.keyCode])
     }
 }
