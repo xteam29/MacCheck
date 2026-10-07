@@ -247,8 +247,9 @@ private struct DisplayColorTest: View {
 private struct KeyboardTestView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pressed: Set<String> = []
-    private let keys = "1234567890QWERTYUIOPASDFGHJKLZXCVBNM".map(String.init)
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 10)
+    @StateObject private var listener = KeyboardEventListener()
+    private let keys = KeyboardEventListener.visibleKeys
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 14)
     var body: some View {
         VStack(spacing: 16) {
             HStack {
@@ -259,63 +260,79 @@ private struct KeyboardTestView: View {
                 Spacer()
                 Button("Uždaryti") { dismiss() }.keyboardShortcut(.escape)
             }
-            LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(keys, id: \.self) { key in
-                    Text(key).frame(maxWidth: .infinity, minHeight: 34)
+            LazyVGrid(columns: columns, spacing: 5) {
+                ForEach(keys.indices, id: \.self) { index in
+                    let key = keys[index]
+                    Text(key).font(.system(size: 11, weight: .medium, design: .rounded))
+                        .frame(maxWidth: .infinity, minHeight: 32)
                         .background(pressed.contains(key) ? Color.green.opacity(0.75) : Color.secondary.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
-            HStack {
-                ForEach(["Tab", "Caps", "Shift", "Control", "Option", "Command", "Space", "Return", "Delete", "←", "↑", "↓", "→"], id: \.self) { key in
-                    Text(key).font(.caption2).padding(7)
-                        .background(pressed.contains(key.uppercased()) ? Color.green.opacity(0.75) : Color.secondary.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                }
-            }
-            Text("Spustelėk žemiau ir bandyk klavišus. Touch ID ir Fn patikrinki atskirai.").font(.callout).foregroundStyle(.secondary)
-            KeyCaptureView { key in
-                if let key, keys.contains(key) { pressed.insert(key) }
-                else if let key { pressed.insert(key.uppercased()) }
-            }.frame(height: 46).background(Color.accentColor.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(Text("Spustelėk šią sritį, kad aktyvuotum testą").foregroundStyle(.secondary).allowsHitTesting(false))
+            Text("Spausk klavišus, kol šis langas atvertas — atskiro įvesties laukelio aktyvuoti nereikia. Touch ID ir kai kuriuos medijos klavišus tikrink atskirai.")
+                .font(.callout).foregroundStyle(.secondary)
             Button("Išvalyti pažymėjimus") { pressed.removeAll() }
             Spacer(minLength: 0)
-        }.padding(24).frame(minWidth: 720, minHeight: 500)
+        }
+        .padding(24).frame(minWidth: 760, minHeight: 560)
+        .onAppear { listener.start { pressed.insert($0) } }
+        .onDisappear { listener.stop() }
     }
 }
 
-private struct KeyCaptureView: NSViewRepresentable {
-    var onKey: (String?) -> Void
-    func makeNSView(context: Context) -> KeyCaptureNSView {
-        let view = KeyCaptureNSView()
-        view.onKey = onKey
-        return view
-    }
-    func updateNSView(_ nsView: KeyCaptureNSView, context: Context) { nsView.onKey = onKey }
-}
+@MainActor
+private final class KeyboardEventListener: ObservableObject {
+    static let visibleKeys = [
+        "ESC", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "DELETE",
+        "TAB", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "\\",
+        "CAPS", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "RETURN", "",
+        "L SHIFT", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "↑", "R SHIFT",
+        "FN", "L CONTROL", "L OPTION", "L COMMAND", "SPACE", "R COMMAND", "R OPTION", "R CONTROL", "←", "↓", "→",
+        "FORWARD DELETE", "HOME", "END", "PAGE UP", "PAGE DOWN"
+    ]
 
-private final class KeyCaptureNSView: NSView {
-    var onKey: ((String?) -> Void)?
-    override var acceptsFirstResponder: Bool { true }
-    override func mouseDown(with event: NSEvent) { window?.makeFirstResponder(self) }
-    override func keyDown(with event: NSEvent) {
-        let specialKeys: [UInt16: String] = [
-            36: "RETURN", 48: "TAB", 49: "SPACE", 51: "DELETE", 53: "ESC",
-            123: "←", 124: "→", 125: "↓", 126: "↑"
-        ]
-        if let name = specialKeys[event.keyCode] {
-            onKey?(name)
+    private var monitor: Any?
+    private var onKey: ((String) -> Void)?
+
+    func start(onKey: @escaping (String) -> Void) {
+        stop()
+        self.onKey = onKey
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            guard let self, event.window === NSApp.keyWindow else { return event }
+            self.handle(event)
+            return event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        onKey = nil
+    }
+
+    private func handle(_ event: NSEvent) {
+        if event.type == .flagsChanged {
+            let modifiers: [UInt16: String] = [
+                54: "R COMMAND", 55: "L COMMAND", 56: "L SHIFT", 60: "R SHIFT",
+                57: "CAPS", 58: "L OPTION", 61: "R OPTION", 59: "L CONTROL", 62: "R CONTROL", 63: "FN"
+            ]
+            if let key = modifiers[event.keyCode] { onKey?(key) }
             return
         }
-        let key = event.charactersIgnoringModifiers?.uppercased()
-        onKey?(key)
-    }
-    override func flagsChanged(with event: NSEvent) {
-        let modifierKeys: [UInt16: String] = [
-            54: "COMMAND", 55: "COMMAND", 56: "SHIFT", 60: "SHIFT",
-            57: "CAPS", 58: "OPTION", 61: "OPTION", 59: "CONTROL", 62: "CONTROL", 63: "FN"
+
+        let physical: [UInt16: String] = [
+            53:"ESC", 122:"F1", 120:"F2", 99:"F3", 118:"F4", 96:"F5", 97:"F6", 98:"F7", 100:"F8", 101:"F9", 109:"F10", 103:"F11", 111:"F12",
+            18:"1", 19:"2", 20:"3", 21:"4", 23:"5", 22:"6", 26:"7", 28:"8", 25:"9", 29:"0", 27:"-", 24:"=", 51:"DELETE",
+            48:"TAB", 12:"Q", 13:"W", 14:"E", 15:"R", 17:"T", 16:"Y", 32:"U", 34:"I", 31:"O", 35:"P", 33:"[", 30:"]", 42:"\\",
+            57:"CAPS", 0:"A", 1:"S", 2:"D", 3:"F", 5:"G", 4:"H", 38:"J", 40:"K", 37:"L", 41:";", 39:"'", 36:"RETURN",
+            56:"L SHIFT", 6:"Z", 7:"X", 8:"C", 9:"V", 11:"B", 45:"N", 46:"M", 43:",", 47:".", 44:"/", 60:"R SHIFT",
+            63:"FN", 59:"L CONTROL", 58:"L OPTION", 55:"L COMMAND", 49:"SPACE", 62:"R CONTROL", 61:"R OPTION", 54:"R COMMAND",
+            123:"←", 124:"→", 125:"↓", 126:"↑", 117:"FORWARD DELETE", 115:"HOME", 119:"END", 116:"PAGE UP", 121:"PAGE DOWN"
         ]
-        onKey?(modifierKeys[event.keyCode])
+        if let key = physical[event.keyCode] { onKey?(key); return }
+        if let character = event.charactersIgnoringModifiers?.uppercased(), !character.isEmpty {
+            onKey?(character)
+        }
     }
 }

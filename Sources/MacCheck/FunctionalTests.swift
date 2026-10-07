@@ -110,6 +110,11 @@ final class MicrophoneRecorder: ObservableObject {
     }
 
     func startRecording() {
+        guard let usage = Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") as? String,
+              !usage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            message = "Ši programos versija neturi mikrofono leidimo aprašo. Atsisiųsk naujausią MacCheck build'ą."
+            return
+        }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             beginRecording()
@@ -229,6 +234,11 @@ final class CameraSession: ObservableObject {
     private var configured = false
 
     func start() {
+        guard let usage = Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") as? String,
+              !usage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            message = "Ši programos versija neturi kameros leidimo aprašo. Atsisiųsk naujausią MacCheck build'ą."
+            return
+        }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: configureAndStart()
         case .notDetermined:
@@ -298,10 +308,21 @@ struct CameraTestView: View {
                 Button("Uždaryti") { camera.stop(); dismiss() }.keyboardShortcut(.escape)
             }
             Text(camera.message).foregroundStyle(.secondary)
-            CameraPreview(session: camera.session)
-                .frame(minWidth: 600, minHeight: 360)
-                .background(.black)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            Group {
+                if camera.running {
+                    CameraPreview(session: camera.session)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "video").font(.system(size: 42))
+                        Text("Kamera bus rodoma ją paleidus")
+                    }.foregroundStyle(.white.opacity(0.8))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(.black)
+                }
+            }
+            .frame(minWidth: 600, minHeight: 360)
+            .background(.black)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
             HStack {
                 Button(camera.running ? "Paleisti iš naujo" : "Paleisti kamerą") {
                     camera.stop()
@@ -312,7 +333,6 @@ struct CameraTestView: View {
         }
         .padding(20)
         .frame(minWidth: 660, minHeight: 500)
-        .onAppear { camera.start() }
         .onDisappear { camera.stop() }
     }
 }
@@ -363,9 +383,9 @@ final class FanRampTest: ObservableObject {
         let gate = FanStressGate()
         self.gate = gate
         running = true
-        remaining = 15
-        message = "Vyksta trumpas apkrovos bandymas. Klausykis, ar ventiliatorius pradeda suktis greičiau."
-        let deadline = Date().addingTimeInterval(15)
+        remaining = 20
+        message = "Vyksta 20 s apkrovos bandymas. Klausykis, ar ventiliatorius pradeda suktis greičiau."
+        let deadline = Date().addingTimeInterval(20)
         let workers = max(1, ProcessInfo.processInfo.activeProcessorCount)
         for _ in 0..<workers {
             DispatchQueue.global(qos: .userInitiated).async {
@@ -377,7 +397,7 @@ final class FanRampTest: ObservableObject {
             }
         }
         Task { @MainActor in
-            for second in stride(from: 14, through: 0, by: -1) {
+            for second in stride(from: 19, through: 0, by: -1) {
                 try? await Task.sleep(for: .seconds(1))
                 guard running else { return }
                 remaining = second
@@ -410,13 +430,13 @@ struct FanRampTestView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding().background(.quaternary).clipShape(RoundedRectangle(cornerRadius: 10))
             if test.running {
-                ProgressView(value: Double(15 - test.remaining), total: 15)
+                ProgressView(value: Double(20 - test.remaining), total: 20)
                 Text("Liko \(test.remaining) s")
                 Button("Sustabdyti dabar") { test.stop() }.buttonStyle(.borderedProminent)
             } else {
-                Button("Pradėti 15 s testą") { test.start() }.buttonStyle(.borderedProminent)
+                Button("Pradėti 20 s testą") { test.start() }.buttonStyle(.borderedProminent)
             }
-            Text("Programa negali saugiai priverstinai nustatyti maksimalių RPM. Šis trumpas apkrovos bandymas leidžia macOS pačiai padidinti ventiliatoriaus greitį. Jis negarantuoja maksimalių apsukų ar RPM matavimo. Jei kompiuteris jau labai įkaitęs, testo nepradėk.")
+            Text("MacBook Air modeliai ventiliatoriaus neturi. Kituose modeliuose macOS pati valdo jo apsukas, todėl programa negali saugiai nustatyti maksimalių RPM. Šis apkrovos bandymas tik leidžia sistemai padidinti greitį, jei to reikia; jis negarantuoja apsukų padidėjimo ar RPM matavimo. Jei kompiuteris jau labai įkaitęs, testo nepradėk.")
                 .font(.callout).foregroundStyle(.secondary)
             Spacer()
         }

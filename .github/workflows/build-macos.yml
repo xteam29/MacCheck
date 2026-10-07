@@ -1,4 +1,4 @@
-name: Build MacCheck for macOS
+name: Build MacCheck for Intel and Apple silicon
 
 on:
   workflow_dispatch:
@@ -7,18 +7,25 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build app
-        run: swift build --configuration release
+      - name: Build universal app
+        run: |
+          swift build --configuration release --triple x86_64-apple-macosx13.0 --build-path .build-x86_64
+          swift build --configuration release --triple arm64-apple-macosx13.0 --build-path .build-arm64
+          mkdir -p .build-universal
+          lipo -create \
+            .build-x86_64/x86_64-apple-macosx/release/MacCheck \
+            .build-arm64/arm64-apple-macosx/release/MacCheck \
+            -output .build-universal/MacCheck
 
-      - name: Package app
+      - name: Package app bundle
         run: |
           APP="MacCheck.app"
           mkdir -p "$APP/Contents/MacOS"
-          cp .build/release/MacCheck "$APP/Contents/MacOS/MacCheck"
+          cp .build-universal/MacCheck "$APP/Contents/MacOS/MacCheck"
 
           cat > "$APP/Contents/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -41,14 +48,22 @@ jobs:
             <string>13.0</string>
             <key>NSPrincipalClass</key>
             <string>NSApplication</string>
+            <key>NSCameraUsageDescription</key>
+            <string>MacCheck naudoja kamerą, kad programoje galėtumėte patikrinti vaizdą.</string>
+            <key>NSMicrophoneUsageDescription</key>
+            <string>MacCheck naudoja mikrofoną bandomajam įrašui. Įrašas lieka šiame kompiuteryje.</string>
           </dict>
           </plist>
           PLIST
 
-          ditto -c -k --sequesterRsrc --keepParent "$APP" MacCheck.app.zip
+          ARCHS="$(lipo -archs "$APP/Contents/MacOS/MacCheck")"
+          echo "Built architectures: $ARCHS"
+          case " $ARCHS " in *" x86_64 "*) ;; *) echo "Intel x86_64 slice is missing"; exit 1 ;; esac
+          case " $ARCHS " in *" arm64 "*) ;; *) echo "Apple silicon arm64 slice is missing"; exit 1 ;; esac
+          ditto -c -k --sequesterRsrc --keepParent "$APP" MacCheck-macOS-Universal.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MacCheck-macOS
-          path: MacCheck.app.zip
+          name: MacCheck-macOS-Universal
+          path: MacCheck-macOS-Universal.zip
           if-no-files-found: error

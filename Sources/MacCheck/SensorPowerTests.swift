@@ -1,15 +1,21 @@
 import SwiftUI
 import AppKit
 import Combine
+import IOKit
 import IOKit.ps
 
 struct ChargingMeterView: View {
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var monitor = ChargingPowerMonitor()
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Įkrovimo matuoklis").font(.title.bold())
+            HStack {
+                Text("Įkrovimo matuoklis").font(.title.bold())
+                Spacer()
+                Button("Uždaryti") { dismiss() }.keyboardShortcut(.escape)
+            }
             Text("Rodoma baterijos pusės telemetrija. Tai nėra USB‑C adapterio išėjimo matavimas.")
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {
@@ -27,7 +33,7 @@ struct ChargingMeterView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
             }
-            Label("V/A/W skaičiuojami pagal baterijos įtampą ir srovę. Kai baterija pilna, įkrovimas pristabdytas arba macOS šių reikšmių nepateikia, dalis laukų gali būti tušti arba rodyti 0.", systemImage: "info.circle")
+            Label(monitor.reading.details, systemImage: "info.circle")
                 .font(.callout).foregroundStyle(.secondary)
             Spacer()
         }
@@ -58,6 +64,7 @@ private struct ChargeReading {
     var percent: Int? = nil
     var isCharging = false
     var state = "Nuskaitomi baterijos duomenys…"
+    var details = "V/A/W skaičiuojami pagal baterijos įtampą ir srovę, ne adapterio išėjimą."
     var updatedAt: Date? = nil
 }
 
@@ -76,14 +83,26 @@ private final class ChargingPowerMonitor: ObservableObject {
             guard let raw = IOPSGetPowerSourceDescription(info, source).takeUnretainedValue() as? [String: Any],
                   (raw[kIOPSTypeKey as String] as? String) == (kIOPSInternalBatteryType as String) else { continue }
 
+            let registry = readSmartBatteryProperties()
             let millivolts = (raw[kIOPSVoltageKey as String] as? NSNumber)?.doubleValue
+                ?? number(registry["Voltage"])
             let milliamps = (raw[kIOPSCurrentKey as String] as? NSNumber)?.doubleValue
+                ?? number(registry["InstantAmperage"])
+                ?? number(registry["Amperage"])
             let voltage = millivolts.map { $0 / 1000 }
             let current = milliamps.map { abs($0) / 1000 }
-            let isCharging = (raw[kIOPSIsChargingKey as String] as? NSNumber)?.boolValue ?? false
+            let isCharging = (raw[kIOPSIsChargingKey as String] as? NSNumber)?.boolValue
+                ?? (registry["IsCharging"] as? NSNumber)?.boolValue
+                ?? false
             let pluggedIn = (raw[kIOPSPowerSourceStateKey as String] as? String) == (kIOPSACPowerValue as String)
             let level = (raw[kIOPSCurrentCapacityKey as String] as? NSNumber)?.intValue
             let state = isCharging ? "Į bateriją teka įkrovimo srovė" : (pluggedIn ? "Maitinimas prijungtas; baterija šiuo metu nekraunama" : "Kompiuteris veikia iš baterijos")
+            var missing: [String] = []
+            if voltage == nil { missing.append("įtampos") }
+            if current == nil { missing.append("srovės") }
+            let details = missing.isEmpty
+                ? "Rodoma baterijos pusės telemetrija, ne USB‑C adapterio išėjimo matavimas. Pilnai įkrautoje baterijoje srovė gali būti artima nuliui."
+                : "Šis Mac pateikė baterijos įkrovos procentą, bet nepateikė \(missing.joined(separator: " ir ")). Todėl jų reikšmių patikimai apskaičiuoti negalima."
             reading = ChargeReading(
                 voltage: voltage,
                 current: current,
@@ -91,12 +110,29 @@ private final class ChargingPowerMonitor: ObservableObject {
                 percent: level,
                 isCharging: isCharging,
                 state: state,
+                details: details,
                 updatedAt: Date()
             )
             return
         }
 
         reading = ChargeReading(state: "Vidinės baterijos duomenų nerasta. Tai gali būti stacionarus Mac arba nepalaikomas maitinimo šaltinis.")
+    }
+
+    private func number(_ value: Any?) -> Double? {
+        (value as? NSNumber)?.doubleValue
+    }
+
+    private func readSmartBatteryProperties() -> [String: Any] {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != 0 else { return [:] }
+        defer { IOObjectRelease(service) }
+
+        var unmanagedProperties: Unmanaged<CFMutableDictionary>?
+        let result = IORegistryEntryCreateCFProperties(service, &unmanagedProperties, kCFAllocatorDefault, 0)
+        guard result == KERN_SUCCESS,
+              let properties = unmanagedProperties?.takeRetainedValue() as? [String: Any] else { return [:] }
+        return properties
     }
 }
 
